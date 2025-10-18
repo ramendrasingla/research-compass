@@ -1,7 +1,3 @@
-# Ignore the open_deep_research nested git repository
-# We maintain our own fork/modifications but don't track them in this repo
-open_deep_research/
-
 # Python
 __pycache__/
 *.py[cod]
