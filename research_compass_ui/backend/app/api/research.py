@@ -36,6 +36,10 @@ async def start_research(request: ResearchRequest) -> SessionInfo:
         config=request.model_dump(),
     )
 
+    print(f"✓ Created session {session['session_id']}")
+    print(f"   Query: {request.query[:50]}...")
+    print(f"   Status: {session['status']}")
+
     return SessionInfo(
         session_id=session["session_id"],
         query=session["query"],
@@ -62,9 +66,13 @@ async def research_stream(websocket: WebSocket, session_id: str):
     - error: Error occurred
     """
     await websocket.accept()
+    print(f"🔌 WebSocket connected for session {session_id}")
 
     # Check if session exists
     if not session_store.session_exists(session_id):
+        print(f"❌ Session {session_id} not found in WebSocket!")
+        all_sessions = session_store.list_sessions()
+        print(f"   Available sessions: {[s['session_id'] for s in all_sessions]}")
         await websocket.send_json({
             "type": "error",
             "message": "Session not found",
@@ -74,6 +82,7 @@ async def research_stream(websocket: WebSocket, session_id: str):
 
     session = session_store.get_session(session_id)
     config_data = session["config"]
+    print(f"✓ Session {session_id} found, starting research...")
 
     try:
         # Update session status to running
@@ -105,7 +114,9 @@ async def research_stream(websocket: WebSocket, session_id: str):
         })
 
         # Run research and stream updates
-        result = None
+        all_events = []
+        accumulated_data = {}
+
         async for event in research_service.run_research(
             query=session["query"],
             session_id=session_id,
@@ -118,12 +129,31 @@ async def research_stream(websocket: WebSocket, session_id: str):
                 "event": str(event),
                 "message": "Research in progress...",
             })
-            result = event
 
-        # Extract and send final result
-        if result:
-            extracted_result = research_service.extract_result(result)
-            if extracted_result:
+            # Accumulate data from all events
+            all_events.append(event)
+            if isinstance(event, dict):
+                for node_name, node_data in event.items():
+                    if isinstance(node_data, dict):
+                        # Merge data from this node
+                        accumulated_data.update(node_data)
+
+        # Extract and send final result from accumulated data
+        print(f"📊 Research completed, processing results...")
+        print(f"   Total events: {len(all_events)}")
+        print(f"   Accumulated data keys: {list(accumulated_data.keys())}")
+
+        if accumulated_data:
+            # Try to extract from accumulated data
+            extracted_result = {
+                "final_report": accumulated_data.get("final_report"),
+                "exported_files": accumulated_data.get("exported_files", []),
+            }
+
+            if extracted_result.get("final_report"):
+                print(f"✅ Final report found! Length: {len(extracted_result['final_report'])} chars")
+                print(f"   Exported files: {len(extracted_result.get('exported_files', []))}")
+
                 session_store.update_session(
                     session_id,
                     status="completed",

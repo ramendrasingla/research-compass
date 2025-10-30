@@ -33,8 +33,10 @@ class Settings(BaseSettings):
     langsmith_tracing: bool = False
 
     class Config:
-        env_file = ".env"
+        # Look for .env in parent directory (research_compass_ui/)
+        env_file = str(Path(__file__).parent.parent.parent.parent / ".env")
         case_sensitive = False
+        extra = "ignore"  # Ignore extra fields in .env file
 
 
 # Global settings instance
@@ -42,3 +44,15 @@ settings = Settings()
 
 # Ensure export directory exists
 Path(settings.export_directory).mkdir(parents=True, exist_ok=True)
+
+# Set environment variables for downstream libraries
+if settings.openai_api_key:
+    os.environ["OPENAI_API_KEY"] = settings.openai_api_key
+
+if settings.semantic_scholar_api_key:
+    os.environ["SEMANTIC_SCHOLAR_API_KEY"] = settings.semantic_scholar_api_key
+
+if settings.langsmith_api_key:
+    os.environ["LANGSMITH_API_KEY"] = settings.langsmith_api_key
+    os.environ["LANGSMITH_PROJECT"] = settings.langsmith_project
+    os.environ["LANGSMITH_TRACING"] = str(settings.langsmith_tracing).lower()

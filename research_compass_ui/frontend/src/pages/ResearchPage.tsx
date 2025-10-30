@@ -1,10 +1,16 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Loader2, CheckCircle, XCircle, Download, ArrowLeft } from 'lucide-react'
+import { Loader2, CheckCircle, XCircle, Download, ArrowLeft, Clock } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { apiClient } from '../utils/api'
 import type { SessionDetail, WebSocketMessage } from '../types'
+
+interface ResearchStep {
+  id: string
+  label: string
+  status: 'pending' | 'active' | 'completed' | 'error'
+}
 
 export default function ResearchPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
@@ -12,21 +18,48 @@ export default function ResearchPage() {
   const [session, setSession] = useState<SessionDetail | null>(null)
   const [messages, setMessages] = useState<WebSocketMessage[]>([])
   const [isConnected, setIsConnected] = useState(false)
+  const [isComplete, setIsComplete] = useState(false)
+  const [steps, setSteps] = useState<ResearchStep[]>([
+    { id: 'init', label: 'Initializing research agent', status: 'pending' },
+    { id: 'brief', label: 'Writing research brief', status: 'pending' },
+    { id: 'research', label: 'Conducting research', status: 'pending' },
+    { id: 'report', label: 'Generating final report', status: 'pending' },
+    { id: 'export', label: 'Preparing exports', status: 'pending' },
+  ])
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!sessionId) return
 
-    // Load session info
-    loadSession()
+    let isSubscribed = true
+    let ws: WebSocket | null = null
 
-    // Connect to WebSocket
-    connectWebSocket()
+    const initConnection = async () => {
+      // Load session info first
+      await loadSession()
+
+      // Small delay to ensure session is fully created
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      // Only connect if component is still mounted
+      if (isSubscribed) {
+        console.log('🔌 Initializing WebSocket connection...')
+        ws = connectWebSocket()
+      }
+    }
+
+    initConnection()
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
+      isSubscribed = false
+      if (ws || wsRef.current) {
+        console.log('🔌 Cleaning up WebSocket connection')
+        const socket = ws || wsRef.current
+        if (socket && socket.readyState !== WebSocket.CLOSED) {
+          socket.close()
+        }
+        wsRef.current = null
       }
     }
   }, [sessionId])
@@ -46,33 +79,81 @@ export default function ResearchPage() {
     }
   }
 
-  const connectWebSocket = () => {
-    if (!sessionId) return
+  const updateStepFromEvent = (eventStr: string) => {
+    // Parse the event string to determine which step is active
+    if (eventStr.includes("'clarify_with_user'") || eventStr.includes('initialization')) {
+      updateStep('init', 'completed')
+    } else if (eventStr.includes("'write_research_brief'")) {
+      updateStep('init', 'completed')
+      updateStep('brief', 'active')
+    } else if (eventStr.includes("'research_supervisor'")) {
+      updateStep('brief', 'completed')
+      updateStep('research', 'active')
+    } else if (eventStr.includes("'final_report_generation'")) {
+      updateStep('research', 'completed')
+      updateStep('report', 'active')
+    } else if (eventStr.includes("'export_reports'")) {
+      updateStep('report', 'completed')
+      updateStep('export', 'active')
+    }
+  }
 
+  const updateStep = (stepId: string, status: 'pending' | 'active' | 'completed' | 'error') => {
+    setSteps(prev => prev.map(step =>
+      step.id === stepId ? { ...step, status } : step
+    ))
+  }
+
+  const connectWebSocket = (): WebSocket | null => {
+    if (!sessionId) return null
+
+    console.log('🔌 Creating WebSocket connection to:', sessionId)
     const ws = apiClient.connectToResearchStream(sessionId)
     wsRef.current = ws
 
     ws.onopen = () => {
       setIsConnected(true)
-      console.log('WebSocket connected')
+      console.log('✅ WebSocket connected successfully')
     }
 
     ws.onmessage = (event) => {
       const message: WebSocketMessage = JSON.parse(event.data)
-      setMessages((prev) => [...prev, message])
+      console.log('📨 WebSocket message:', message.type, message)
 
-      // Update session if complete
+      // Update steps based on progress messages
+      if (message.type === 'progress' && message.stage === 'initialization') {
+        updateStep('init', 'active')
+      } else if (message.type === 'progress' && message.event) {
+        updateStepFromEvent(message.event)
+      }
+
+      // Handle completion
       if (message.type === 'complete' && message.result) {
+        // Mark all steps as completed
+        setSteps(prev => prev.map(step => ({ ...step, status: 'completed' as const })))
+        setIsComplete(true)
+
         setSession((prev) => prev ? {
           ...prev,
           status: 'completed',
           result: message.result,
         } : null)
       }
+
+      // Handle errors
+      if (message.type === 'error') {
+        console.error('❌ Research error:', message.message)
+        // Mark current active step as error
+        setSteps(prev => prev.map(step =>
+          step.status === 'active' ? { ...step, status: 'error' as const } : step
+        ))
+      }
+
+      setMessages((prev) => [...prev, message])
     }
 
     ws.onerror = (error) => {
-      console.error('WebSocket error:', error)
+      console.error('❌ WebSocket error:', error)
       setMessages((prev) => [...prev, {
         type: 'error',
         message: 'Connection error occurred',
@@ -81,12 +162,18 @@ export default function ResearchPage() {
 
     ws.onclose = () => {
       setIsConnected(false)
-      console.log('WebSocket disconnected')
+      console.log('🔌 WebSocket disconnected')
     }
+
+    return ws
   }
 
   const getStatusIcon = () => {
     if (!session) return <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
+
+    if (isComplete) {
+      return <CheckCircle className="w-5 h-5 text-green-600" />
+    }
 
     switch (session.status) {
       case 'completed':
@@ -101,6 +188,10 @@ export default function ResearchPage() {
   const getStatusText = () => {
     if (!session) return 'Loading...'
 
+    if (isComplete) {
+      return 'Research completed successfully'
+    }
+
     switch (session.status) {
       case 'initializing':
         return 'Initializing research...'
@@ -114,6 +205,19 @@ export default function ResearchPage() {
         return 'Connection lost'
       default:
         return 'Unknown status'
+    }
+  }
+
+  const getStepIcon = (status: 'pending' | 'active' | 'completed' | 'error') => {
+    switch (status) {
+      case 'completed':
+        return <CheckCircle className="w-5 h-5 text-green-600" />
+      case 'active':
+        return <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
+      case 'error':
+        return <XCircle className="w-5 h-5 text-red-600" />
+      default:
+        return <Clock className="w-5 h-5 text-gray-400" />
     }
   }
 
@@ -170,7 +274,7 @@ export default function ResearchPage() {
               </div>
             </div>
 
-            {session.status === 'completed' && session.result?.final_report && (
+            {(isComplete || session.status === 'completed') && session.result?.final_report && (
               <button
                 onClick={() => downloadReport('markdown')}
                 className="btn-secondary flex items-center space-x-2"
@@ -193,57 +297,87 @@ export default function ResearchPage() {
                 Research Progress
               </h2>
 
-              <div className="space-y-3">
-                {messages.length === 0 && (
-                  <div className="text-sm text-gray-500">
-                    Waiting for updates...
-                  </div>
-                )}
+              {/* Step Indicators */}
+              <div className="space-y-3 mb-6">
+                {steps.map((step, index) => (
+                  <div key={step.id} className="flex items-start space-x-3">
+                    {/* Icon */}
+                    <div className="flex-shrink-0 mt-0.5">
+                      {getStepIcon(step.status)}
+                    </div>
 
-                {messages.map((message, index) => (
-                  <div
-                    key={index}
-                    className={`p-3 rounded-lg text-sm ${
-                      message.type === 'error'
-                        ? 'bg-red-50 text-red-800'
-                        : message.type === 'complete'
-                        ? 'bg-green-50 text-green-800'
-                        : 'bg-blue-50 text-blue-800'
-                    }`}
-                  >
-                    {message.type === 'status' && (
-                      <div className="flex items-start space-x-2">
-                        <Loader2 className="w-4 h-4 animate-spin mt-0.5 flex-shrink-0" />
-                        <span>{message.message}</span>
+                    {/* Label and connector */}
+                    <div className="flex-1">
+                      <div className={`text-sm font-medium ${
+                        step.status === 'completed' ? 'text-green-600' :
+                        step.status === 'active' ? 'text-primary-600' :
+                        step.status === 'error' ? 'text-red-600' :
+                        'text-gray-400'
+                      }`}>
+                        {step.label}
                       </div>
-                    )}
 
-                    {message.type === 'progress' && (
-                      <div>
-                        <div className="font-medium mb-1">
-                          {message.stage?.replace('_', ' ').toUpperCase()}
-                        </div>
-                        <div className="text-xs opacity-75">{message.message}</div>
-                      </div>
-                    )}
-
-                    {message.type === 'complete' && (
-                      <div className="flex items-start space-x-2">
-                        <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                        <span>Research completed successfully!</span>
-                      </div>
-                    )}
-
-                    {message.type === 'error' && (
-                      <div className="flex items-start space-x-2">
-                        <XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                        <span>{message.message}</span>
-                      </div>
-                    )}
+                      {/* Connector line */}
+                      {index < steps.length - 1 && (
+                        <div className={`w-0.5 h-4 ml-2.5 mt-1 ${
+                          step.status === 'completed' ? 'bg-green-200' : 'bg-gray-200'
+                        }`} />
+                      )}
+                    </div>
                   </div>
                 ))}
+              </div>
 
-                <div ref={messagesEndRef} />
+              {/* Recent Messages */}
+              <div className="pt-4 border-t border-gray-200">
+                <h3 className="text-sm font-medium text-gray-700 mb-3">Recent Activity</h3>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {messages.length === 0 && (
+                    <div className="text-xs text-gray-500">
+                      Waiting for updates...
+                    </div>
+                  )}
+
+                  {messages.slice(-5).reverse().map((message, index) => {
+                    // Only show important messages
+                    if (message.type === 'progress' && message.event) {
+                      return null // Skip detailed progress events
+                    }
+
+                    return (
+                      <div
+                        key={index}
+                        className={`p-2 rounded text-xs ${
+                          message.type === 'error'
+                            ? 'bg-red-50 text-red-700'
+                            : message.type === 'complete'
+                            ? 'bg-green-50 text-green-700'
+                            : 'bg-gray-50 text-gray-700'
+                        }`}
+                      >
+                        {message.type === 'complete' && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="w-3 h-3 flex-shrink-0" />
+                            <span>Completed successfully!</span>
+                          </div>
+                        )}
+
+                        {message.type === 'error' && (
+                          <div className="flex items-center space-x-1">
+                            <XCircle className="w-3 h-3 flex-shrink-0" />
+                            <span>{message.message}</span>
+                          </div>
+                        )}
+
+                        {(message.type === 'status' || (message.type === 'progress' && !message.event)) && (
+                          <span>{message.message}</span>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  <div ref={messagesEndRef} />
+                </div>
               </div>
 
               {/* Configuration Info */}

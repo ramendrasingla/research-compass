@@ -22,7 +22,7 @@ export default function HomePage() {
   const [maxIterations, setMaxIterations] = useState(6)
   const [maxConcurrentUnits, setMaxConcurrentUnits] = useState(5)
   const [selectedExportFormats, setSelectedExportFormats] = useState<string[]>([])
-  const [allowClarification, setAllowClarification] = useState(true)
+  const [allowClarification, setAllowClarification] = useState(false)
 
   useEffect(() => {
     loadConfiguration()
@@ -48,7 +48,10 @@ export default function HomePage() {
     if (!query.trim()) return
 
     setIsLoading(true)
+    console.log('🚀 Starting research with query:', query.trim())
+
     try {
+      console.log('📤 Sending request to /api/research/start...')
       const session = await apiClient.startResearch({
         query: query.trim(),
         search_api: selectedSearchAPI,
@@ -60,11 +63,20 @@ export default function HomePage() {
         allow_clarification: allowClarification,
       })
 
+      console.log('✅ Session created:', session)
+      console.log('   Session ID:', session.session_id)
+      console.log('   Status:', session.status)
+
       // Navigate to research page
+      console.log('🔄 Navigating to /research/' + session.session_id)
       navigate(`/research/${session.session_id}`)
     } catch (error) {
-      console.error('Failed to start research:', error)
-      alert('Failed to start research. Please try again.')
+      console.error('❌ Failed to start research:', error)
+      if (error instanceof Error) {
+        console.error('   Error message:', error.message)
+        console.error('   Error stack:', error.stack)
+      }
+      alert(`Failed to start research: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`)
     } finally {
       setIsLoading(false)
     }

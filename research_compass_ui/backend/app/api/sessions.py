@@ -48,6 +48,12 @@ async def get_session(session_id: str) -> SessionDetail:
     """
     session = session_store.get_session(session_id)
     if not session:
+        # Debug: List all available sessions
+        all_sessions = session_store.list_sessions()
+        print(f"❌ Session {session_id} not found!")
+        print(f"   Available sessions: {len(all_sessions)}")
+        for s in all_sessions:
+            print(f"   - {s['session_id']}: {s['status']}")
         raise HTTPException(status_code=404, detail="Session not found")
 
     return SessionDetail(
