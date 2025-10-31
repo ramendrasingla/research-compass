@@ -85,9 +85,17 @@ async def health_check() -> HealthResponse:
 if __name__ == "__main__":
     import uvicorn
 
+    print("🚀 Starting Research Compass Backend")
+    print(f"   Host: {settings.host}")
+    print(f"   Port: {settings.port}")
+    print(f"   Reload: {settings.reload}")
+    print(f"   Workers: 1 (single worker mode for session consistency)")
+    print("")
+
     uvicorn.run(
         "app.main:app",
         host=settings.host,
         port=settings.port,
         reload=settings.reload,
+        workers=1,  # Single worker to ensure session store consistency
     )

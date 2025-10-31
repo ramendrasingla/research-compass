@@ -52,6 +52,12 @@ export default function HomePage() {
 
     try {
       console.log('📤 Sending request to /api/research/start...')
+      console.log('🚀 Starting research with config:', {
+        export_formats: selectedExportFormats,
+        search_api: selectedSearchAPI,
+        max_iterations: maxIterations,
+      })
+
       const session = await apiClient.startResearch({
         query: query.trim(),
         search_api: selectedSearchAPI,
@@ -66,6 +72,7 @@ export default function HomePage() {
       console.log('✅ Session created:', session)
       console.log('   Session ID:', session.session_id)
       console.log('   Status:', session.status)
+      console.log('   Export formats sent:', selectedExportFormats)
 
       // Navigate to research page
       console.log('🔄 Navigating to /research/' + session.session_id)

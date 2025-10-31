@@ -5,6 +5,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { apiClient } from '../utils/api'
 import type { SessionDetail, WebSocketMessage } from '../types'
+import ResearchTreeGraph from '../components/ResearchTreeGraph'
+import ResearchDetailModal from '../components/ResearchDetailModal'
 
 interface ResearchStep {
   id: string
@@ -12,22 +14,39 @@ interface ResearchStep {
   status: 'pending' | 'active' | 'completed' | 'error'
 }
 
+interface ResearchTopicNode {
+  id: string
+  topic: string
+  status: 'pending' | 'active' | 'completed' | 'error'
+  iteration?: number
+  startTime?: Date
+  endTime?: Date
+  findings?: string
+  sources?: string[]
+  searchApi?: string
+}
+
 export default function ResearchPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
   const [session, setSession] = useState<SessionDetail | null>(null)
-  const [messages, setMessages] = useState<WebSocketMessage[]>([])
   const [isConnected, setIsConnected] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
   const [steps, setSteps] = useState<ResearchStep[]>([
-    { id: 'init', label: 'Initializing research agent', status: 'pending' },
-    { id: 'brief', label: 'Writing research brief', status: 'pending' },
-    { id: 'research', label: 'Conducting research', status: 'pending' },
-    { id: 'report', label: 'Generating final report', status: 'pending' },
-    { id: 'export', label: 'Preparing exports', status: 'pending' },
+    { id: 'init', label: 'Getting ready', status: 'pending' },
+    { id: 'brief', label: 'Understanding your question', status: 'pending' },
+    { id: 'research', label: 'Researching topics', status: 'pending' },
+    { id: 'report', label: 'Writing your report', status: 'pending' },
+    { id: 'export', label: 'Finishing up', status: 'pending' },
   ])
+
+  // Research tree visualization state
+  const [supervisorStatus, setSupervisorStatus] = useState<'idle' | 'thinking' | 'delegating' | 'completed'>('idle')
+  const [currentIteration, setCurrentIteration] = useState(0)
+  const [researchTopics, setResearchTopics] = useState<ResearchTopicNode[]>([])
+  const [selectedTopic, setSelectedTopic] = useState<ResearchTopicNode | null>(null)
+
   const wsRef = useRef<WebSocket | null>(null)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!sessionId) return
@@ -64,11 +83,6 @@ export default function ResearchPage() {
     }
   }, [sessionId])
 
-  useEffect(() => {
-    // Auto-scroll to bottom of messages
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
   const loadSession = async () => {
     if (!sessionId) return
     try {
@@ -104,6 +118,184 @@ export default function ResearchPage() {
     ))
   }
 
+  const parseResearchEvent = (eventStr: string) => {
+    // Parse event string to extract research topic information
+    try {
+      // Log full event periodically for debugging
+      if (Math.random() < 0.1) { // Log 10% of events fully
+        console.log('📊 Full event sample:', eventStr)
+      }
+
+      // Track research iterations FIRST so we have the correct value
+      if (eventStr.includes('research_iterations')) {
+        const iterMatch = /research_iterations['"]\s*[:=]\s*(\d+)/i.exec(eventStr)
+        if (iterMatch) {
+          const newIteration = parseInt(iterMatch[1], 10)
+          console.log('🔢 Iteration:', newIteration)
+          setCurrentIteration(newIteration)
+        }
+      }
+
+      // Check if supervisor is active - multiple patterns
+      if (eventStr.includes("supervisor") && !eventStr.includes("supervisor_tools")) {
+        console.log('🧠 Supervisor thinking')
+        setSupervisorStatus('thinking')
+      }
+
+      // Check if supervisor is delegating research - look for ConductResearch tool
+      if (eventStr.includes("ConductResearch") || eventStr.includes("conduct_research")) {
+        console.log('📤 Supervisor delegating research')
+        setSupervisorStatus('delegating')
+
+        // Extract the current iteration - try to find it in this specific event
+        const iterMatch = /research_iterations['"]\s*[:=]\s*(\d+)/i.exec(eventStr)
+        let currentIter = iterMatch ? parseInt(iterMatch[1], 10) : currentIteration
+
+        // Update global iteration if found
+        if (iterMatch && currentIter > currentIteration) {
+          console.log('🔢 Updated iteration from event:', currentIter)
+          setCurrentIteration(currentIter)
+        }
+
+        // Default to 1 if still not set
+        if (!currentIter) currentIter = 1
+
+        // Try multiple patterns for research topics
+        const patterns = [
+          /research_topic['"]\s*[:=]\s*['"]([^'"]+)['"]/gi,
+          /ConductResearch\([^)]*['"]([^'"]{20,})['"]/gi,
+          /'research_topic':\s*'([^']+)'/gi,
+          /"research_topic":\s*"([^"]+)"/gi,
+        ]
+
+        let foundAny = false
+        for (const pattern of patterns) {
+          let match
+          while ((match = pattern.exec(eventStr)) !== null) {
+            const topic = match[1]
+            if (topic && topic.length > 10) { // At least 10 chars for valid topic
+              console.log('🔍 Found research topic:', topic, 'Iteration:', currentIter)
+              foundAny = true
+              const topicId = `topic-${Date.now()}-${Math.random()}`
+
+              // Check if this topic already exists
+              setResearchTopics(prev => {
+                const exists = prev.some(t => t.topic === topic)
+                if (!exists) {
+                  console.log('✅ Adding new topic to state')
+                  return [...prev, {
+                    id: topicId,
+                    topic: topic,
+                    status: 'active',
+                    iteration: currentIter,
+                    startTime: new Date(),
+                    sources: [],
+                  }]
+                }
+                console.log('⚠️ Topic already exists, skipping')
+                return prev
+              })
+            }
+          }
+        }
+
+        if (!foundAny) {
+          console.log('⚠️ ConductResearch found but no topic extracted. Event:', eventStr.substring(0, 300))
+        }
+      }
+
+      // Extract search API and sources from researcher tool calls
+      if (eventStr.includes("'researcher_tools'") || eventStr.includes('"researcher_tools"')) {
+        // Try to extract search results and sources
+        const searchPatterns = [
+          /arxiv_search/i,
+          /tavily_search/i,
+          /exa_search/i,
+          /you_search/i,
+        ]
+
+        let searchApi = ''
+        for (const pattern of searchPatterns) {
+          if (pattern.test(eventStr)) {
+            searchApi = pattern.source.replace('_search', '').replace(/\\/gi, '').replace(/i$/, '')
+            break
+          }
+        }
+
+        // Extract source URLs or titles from search results
+        const sources: string[] = []
+
+        // Look for URLs in the event
+        const urlPattern = /https?:\/\/[^\s'"]+/gi
+        const urlMatches = eventStr.match(urlPattern)
+        if (urlMatches) {
+          sources.push(...urlMatches.slice(0, 3)) // Take first 3 URLs
+        }
+
+        // Look for paper titles or article titles
+        const titlePattern = /title['"]\s*[:=]\s*['"]([^'"]{10,100})['"]/gi
+        let titleMatch
+        while ((titleMatch = titlePattern.exec(eventStr)) !== null && sources.length < 3) {
+          sources.push(titleMatch[1])
+        }
+
+        // Update the most recent active topic with sources
+        if ((searchApi || sources.length > 0)) {
+          setResearchTopics(prev => {
+            const activeTopics = prev.filter(t => t.status === 'active')
+            if (activeTopics.length > 0) {
+              const lastActive = activeTopics[activeTopics.length - 1]
+              return prev.map(t =>
+                t.id === lastActive.id
+                  ? {
+                      ...t,
+                      searchApi: searchApi || t.searchApi,
+                      sources: sources.length > 0 ? [...(t.sources || []), ...sources].slice(0, 5) : t.sources
+                    }
+                  : t
+              )
+            }
+            return prev
+          })
+        }
+      }
+
+      // Check for compressed research (completed research)
+      if (eventStr.includes('compressed_research') && eventStr.includes("'compress_research'")) {
+        // Try to extract the research topic and findings
+        const compressedMatch = /compressed_research['"]\s*[:=]\s*['"]([^'"]{0,500})/i.exec(eventStr)
+        if (compressedMatch) {
+          const findings = compressedMatch[1]
+
+          // Mark the most recent active topic as completed with findings
+          setResearchTopics(prev => {
+            const activeTopics = prev.filter(t => t.status === 'active')
+            if (activeTopics.length > 0) {
+              const lastActive = activeTopics[activeTopics.length - 1]
+              return prev.map(t =>
+                t.id === lastActive.id
+                  ? { ...t, status: 'completed', findings, endTime: new Date() }
+                  : t
+              )
+            }
+            return prev
+          })
+        }
+      }
+
+      // Check if research supervisor is complete
+      if (eventStr.includes("'final_report_generation'")) {
+        setSupervisorStatus('completed')
+        // Mark any remaining active topics as completed
+        setResearchTopics(prev => prev.map(t =>
+          t.status === 'active' ? { ...t, status: 'completed', endTime: new Date() } : t
+        ))
+      }
+    } catch (error) {
+      console.error('Error parsing research event:', error)
+    }
+  }
+
   const connectWebSocket = (): WebSocket | null => {
     if (!sessionId) return null
 
@@ -125,6 +317,8 @@ export default function ResearchPage() {
         updateStep('init', 'active')
       } else if (message.type === 'progress' && message.event) {
         updateStepFromEvent(message.event)
+        // Parse the event for research tree visualization
+        parseResearchEvent(message.event)
       }
 
       // Handle completion
@@ -148,16 +342,10 @@ export default function ResearchPage() {
           step.status === 'active' ? { ...step, status: 'error' as const } : step
         ))
       }
-
-      setMessages((prev) => [...prev, message])
     }
 
     ws.onerror = (error) => {
       console.error('❌ WebSocket error:', error)
-      setMessages((prev) => [...prev, {
-        type: 'error',
-        message: 'Connection error occurred',
-      }])
     }
 
     ws.onclose = () => {
@@ -221,7 +409,7 @@ export default function ResearchPage() {
     }
   }
 
-  const downloadReport = (format: string) => {
+  const downloadMarkdown = () => {
     if (!session?.result?.final_report) return
 
     const blob = new Blob([session.result.final_report], { type: 'text/markdown' })
@@ -233,6 +421,26 @@ export default function ResearchPage() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+  }
+
+  const getExportFormatInfo = (filePath: string) => {
+    const extension = filePath.split('.').pop()?.toLowerCase()
+    const fileName = filePath.split('/').pop() || filePath
+
+    const formatMap: Record<string, { label: string; icon: string }> = {
+      'pdf': { label: 'PDF', icon: '📄' },
+      'html': { label: 'HTML', icon: '🌐' },
+      'docx': { label: 'Word', icon: '📝' },
+      'md': { label: 'Markdown', icon: '📋' },
+      'json': { label: 'JSON', icon: '📊' },
+      'txt': { label: 'Text', icon: '📃' },
+    }
+
+    return {
+      extension: extension || 'unknown',
+      fileName,
+      ...formatMap[extension || ''] || { label: extension?.toUpperCase() || 'File', icon: '📁' }
+    }
   }
 
   if (!session) {
@@ -274,14 +482,45 @@ export default function ResearchPage() {
               </div>
             </div>
 
-            {(isComplete || session.status === 'completed') && session.result?.final_report && (
-              <button
-                onClick={() => downloadReport('markdown')}
-                className="btn-secondary flex items-center space-x-2"
-              >
-                <Download className="w-4 h-4" />
-                <span>Download Report</span>
-              </button>
+            {(isComplete || session.status === 'completed') && (
+              <div className="flex items-center gap-2">
+                {/* Markdown download always available */}
+                {session.result?.final_report && (
+                  <button
+                    onClick={downloadMarkdown}
+                    className="btn-secondary flex items-center space-x-2"
+                    title="Download as Markdown"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>📋 Markdown</span>
+                  </button>
+                )}
+
+                {/* Show other export formats if available */}
+                {session.result?.exported_files && session.result.exported_files.length > 0 && (
+                  session.result.exported_files
+                    .filter(file => !file.endsWith('.md')) // Skip markdown as we handle it above
+                    .slice(0, 2) // Show max 2 additional formats in header
+                    .map((file, index) => {
+                      const info = getExportFormatInfo(file)
+                      return (
+                        <button
+                          key={index}
+                          className="btn-secondary flex items-center space-x-2"
+                          title={`Download ${info.label} file`}
+                          onClick={() => {
+                            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+                            const downloadUrl = `${apiUrl}/api/research/download/${encodeURIComponent(file)}`
+                            window.open(downloadUrl, '_blank')
+                          }}
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>{info.icon} {info.label}</span>
+                        </button>
+                      )
+                    })
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -300,84 +539,46 @@ export default function ResearchPage() {
               {/* Step Indicators */}
               <div className="space-y-3 mb-6">
                 {steps.map((step, index) => (
-                  <div key={step.id} className="flex items-start space-x-3">
-                    {/* Icon */}
-                    <div className="flex-shrink-0 mt-0.5">
-                      {getStepIcon(step.status)}
-                    </div>
-
-                    {/* Label and connector */}
-                    <div className="flex-1">
-                      <div className={`text-sm font-medium ${
-                        step.status === 'completed' ? 'text-green-600' :
-                        step.status === 'active' ? 'text-primary-600' :
-                        step.status === 'error' ? 'text-red-600' :
-                        'text-gray-400'
-                      }`}>
-                        {step.label}
+                  <div key={step.id}>
+                    <div className="flex items-start space-x-3">
+                      {/* Icon */}
+                      <div className="flex-shrink-0 mt-0.5">
+                        {getStepIcon(step.status)}
                       </div>
 
-                      {/* Connector line */}
-                      {index < steps.length - 1 && (
-                        <div className={`w-0.5 h-4 ml-2.5 mt-1 ${
-                          step.status === 'completed' ? 'bg-green-200' : 'bg-gray-200'
-                        }`} />
-                      )}
+                      {/* Label and connector */}
+                      <div className="flex-1">
+                        <div className={`text-sm font-medium ${
+                          step.status === 'completed' ? 'text-green-600' :
+                          step.status === 'active' ? 'text-primary-600' :
+                          step.status === 'error' ? 'text-red-600' :
+                          'text-gray-400'
+                        }`}>
+                          {step.label}
+                        </div>
+
+                        {/* Research Tree for "Researching topics" step */}
+                        {step.id === 'research' && (step.status === 'active' || step.status === 'completed') && (
+                          <ResearchTreeGraph
+                            supervisorStatus={supervisorStatus}
+                            currentIteration={currentIteration}
+                            maxIterations={session?.config.max_researcher_iterations || 6}
+                            researchTopics={researchTopics}
+                            compact={true}
+                            onTopicClick={setSelectedTopic}
+                          />
+                        )}
+
+                        {/* Connector line */}
+                        {index < steps.length - 1 && (
+                          <div className={`w-0.5 h-4 ml-2.5 mt-1 ${
+                            step.status === 'completed' ? 'bg-green-200' : 'bg-gray-200'
+                          }`} />
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
-              </div>
-
-              {/* Recent Messages */}
-              <div className="pt-4 border-t border-gray-200">
-                <h3 className="text-sm font-medium text-gray-700 mb-3">Recent Activity</h3>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {messages.length === 0 && (
-                    <div className="text-xs text-gray-500">
-                      Waiting for updates...
-                    </div>
-                  )}
-
-                  {messages.slice(-5).reverse().map((message, index) => {
-                    // Only show important messages
-                    if (message.type === 'progress' && message.event) {
-                      return null // Skip detailed progress events
-                    }
-
-                    return (
-                      <div
-                        key={index}
-                        className={`p-2 rounded text-xs ${
-                          message.type === 'error'
-                            ? 'bg-red-50 text-red-700'
-                            : message.type === 'complete'
-                            ? 'bg-green-50 text-green-700'
-                            : 'bg-gray-50 text-gray-700'
-                        }`}
-                      >
-                        {message.type === 'complete' && (
-                          <div className="flex items-center space-x-1">
-                            <CheckCircle className="w-3 h-3 flex-shrink-0" />
-                            <span>Completed successfully!</span>
-                          </div>
-                        )}
-
-                        {message.type === 'error' && (
-                          <div className="flex items-center space-x-1">
-                            <XCircle className="w-3 h-3 flex-shrink-0" />
-                            <span>{message.message}</span>
-                          </div>
-                        )}
-
-                        {(message.type === 'status' || (message.type === 'progress' && !message.event)) && (
-                          <span>{message.message}</span>
-                        )}
-                      </div>
-                    )
-                  })}
-
-                  <div ref={messagesEndRef} />
-                </div>
               </div>
 
               {/* Configuration Info */}
@@ -438,27 +639,70 @@ export default function ResearchPage() {
               {session.result?.exported_files && session.result.exported_files.length > 0 && (
                 <div className="mt-8 pt-8 border-t border-gray-200">
                   <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                    Exported Files
+                    Exported Files ({session.result.exported_files.length})
                   </h3>
-                  <ul className="space-y-2">
-                    {session.result.exported_files.map((file, index) => (
-                      <li key={index} className="text-sm">
-                        <a
-                          href="#"
-                          className="text-primary-600 hover:text-primary-700 flex items-center space-x-2"
+                  <p className="text-xs text-gray-600 mb-3">
+                    These files have been saved on the server in the configured export directory.
+                  </p>
+                  <div className="space-y-2">
+                    {session.result.exported_files.map((file, index) => {
+                      const info = getExportFormatInfo(file)
+                      return (
+                        <div
+                          key={index}
+                          className="p-3 bg-gray-50 rounded border border-gray-200 hover:bg-gray-100 transition-colors"
                         >
-                          <Download className="w-4 h-4" />
-                          <span>{file}</span>
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span className="text-lg">{info.icon}</span>
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium text-gray-900 truncate">
+                                  {info.fileName}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {info.label} format
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <button
+                                onClick={() => {
+                                  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+                                  const downloadUrl = `${apiUrl}/api/research/download/${encodeURIComponent(file)}`
+                                  window.open(downloadUrl, '_blank')
+                                }}
+                                className="px-3 py-1 text-xs text-white bg-primary-600 hover:bg-primary-700 rounded transition-colors"
+                              >
+                                Download
+                              </button>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(file)
+                                  alert(`Filename copied: ${file}`)
+                                }}
+                                className="text-xs text-gray-600 hover:text-gray-700"
+                                title="Copy filename"
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Research Detail Modal */}
+      <ResearchDetailModal
+        topic={selectedTopic}
+        onClose={() => setSelectedTopic(null)}
+      />
     </div>
   )
 }

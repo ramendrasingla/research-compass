@@ -711,26 +711,46 @@ async def export_reports(state: AgentState, config: RunnableConfig):
 
     if not configurable.export_formats:
         # No export formats configured, skip export
-        return {}
+        return {"exported_files": {}}
 
     # Step 2: Import export functionality
     from research_compass_core.exporters import export_report
 
     # Step 3: Export to all configured formats
     try:
+        final_report = state.get("final_report", "")
+        research_brief = state.get("research_brief", "research_report")
+        export_formats = [f.value for f in configurable.export_formats]
+        export_dir = configurable.export_directory
+
+        print(f"📤 Starting export process...")
+        print(f"   Final report length: {len(final_report)} chars")
+        print(f"   Research brief: {research_brief}")
+        print(f"   Export formats: {export_formats}")
+        print(f"   Export directory: {export_dir}")
+
         exported_files = await export_report(
-            markdown_content=state.get("final_report", ""),
-            research_brief=state.get("research_brief", "research_report"),
-            export_formats=[f.value for f in configurable.export_formats],
-            export_dir=configurable.export_directory
+            markdown_content=final_report,
+            research_brief=research_brief,
+            export_formats=export_formats,
+            export_dir=export_dir
         )
+
+        print(f"✅ Export completed successfully!")
+        print(f"   Exported files: {exported_files}")
+        print(f"   Number of files: {len(exported_files) if isinstance(exported_files, (list, dict)) else 'N/A'}")
 
         return {"exported_files": exported_files}
 
     except Exception as e:
         # Log error but don't fail the entire workflow
         import logging
+        import traceback
         logging.error(f"Export failed: {e}")
+        print(f"❌ Export failed: {e}")
+        print(f"   Traceback: {traceback.format_exc()}")
+        print(f"   Export formats requested: {[f.value for f in configurable.export_formats]}")
+        print(f"   Export directory: {configurable.export_directory}")
         return {"exported_files": {}}
 
 # Main Deep Researcher Graph Construction

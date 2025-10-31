@@ -533,11 +533,19 @@ async def export_report(
     Returns:
         Dictionary mapping format to filepath for successfully exported files
     """
+    print(f"📝 export_report called:")
+    print(f"   Markdown length: {len(markdown_content)} chars")
+    print(f"   Research brief: {research_brief}")
+    print(f"   Export formats: {export_formats}")
+    print(f"   Export directory: {export_dir}")
+
     # Create export directory if it doesn't exist
     Path(export_dir).mkdir(parents=True, exist_ok=True)
+    print(f"✓ Export directory created/verified: {export_dir}")
 
     # Generate base filename
     base_filename = generate_filename(research_brief)
+    print(f"✓ Base filename: {base_filename}")
 
     # Initialize exporters
     exporters = {
@@ -554,18 +562,31 @@ async def export_report(
     # Export to each requested format
     for fmt in export_formats:
         try:
+            print(f"\n🔄 Processing format: {fmt}")
             exporter = exporters.get(fmt)
             if not exporter:
                 logger.warning(f"Unknown export format: {fmt}")
+                print(f"   ⚠️  Unknown format: {fmt}")
                 continue
 
             output_path = str(Path(export_dir) / f"{base_filename}.{fmt}")
+            print(f"   Output path: {output_path}")
+
             filepath = await exporter.export(markdown_content, output_path)
             exported_files[fmt] = filepath
             logger.info(f"Successfully exported to {fmt}: {filepath}")
+            print(f"   ✅ Successfully exported {fmt}: {filepath}")
 
         except Exception as e:
             # Log error but continue with other formats
+            import traceback
             logger.error(f"Failed to export {fmt}: {e}")
+            print(f"   ❌ Failed to export {fmt}: {e}")
+            print(f"   Traceback: {traceback.format_exc()}")
+
+    print(f"\n📦 Export summary:")
+    print(f"   Total formats requested: {len(export_formats)}")
+    print(f"   Successfully exported: {len(exported_files)}")
+    print(f"   Exported files: {exported_files}")
 
     return exported_files

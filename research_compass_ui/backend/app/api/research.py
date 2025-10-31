@@ -1,6 +1,9 @@
 """API routes for research operations."""
 
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 
 from app.core.config import settings
 from app.models.schemas import ResearchRequest, SessionInfo
@@ -95,16 +98,21 @@ async def research_stream(websocket: WebSocket, session_id: str):
         })
 
         # Create configuration
+        export_formats = config_data.get("export_formats", [])
+        print(f"📦 Export formats from config: {export_formats}")
+
         configuration = research_service.create_configuration(
             search_api=config_data.get("search_api", "arxiv"),
             research_model=config_data.get("research_model", "openai:gpt-4o"),
             summarization_model=config_data.get("summarization_model", "openai:gpt-4o-mini"),
             max_researcher_iterations=config_data.get("max_researcher_iterations", 6),
             max_concurrent_research_units=config_data.get("max_concurrent_research_units", 5),
-            export_formats=config_data.get("export_formats", []),
+            export_formats=export_formats,
             export_directory=settings.export_directory,
             allow_clarification=config_data.get("allow_clarification", True),
         )
+
+        print(f"✅ Configuration created with {len(export_formats)} export formats")
 
         # Send initialization message
         await websocket.send_json({
@@ -145,14 +153,27 @@ async def research_stream(websocket: WebSocket, session_id: str):
 
         if accumulated_data:
             # Try to extract from accumulated data
+            # Convert exported_files dict to list of filenames
+            exported_files_dict = accumulated_data.get("exported_files", {})
+            exported_files_list = []
+
+            if isinstance(exported_files_dict, dict):
+                # Extract just the filenames (basename) from full paths
+                from pathlib import Path
+                exported_files_list = [Path(filepath).name for filepath in exported_files_dict.values()]
+
             extracted_result = {
                 "final_report": accumulated_data.get("final_report"),
-                "exported_files": accumulated_data.get("exported_files", []),
+                "exported_files": exported_files_list,
             }
 
             if extracted_result.get("final_report"):
                 print(f"✅ Final report found! Length: {len(extracted_result['final_report'])} chars")
-                print(f"   Exported files: {len(extracted_result.get('exported_files', []))}")
+                exported_files = extracted_result.get('exported_files', [])
+                print(f"   Exported files: {len(exported_files)}")
+                if exported_files:
+                    for file in exported_files:
+                        print(f"      - {file}")
 
                 session_store.update_session(
                     session_id,
@@ -188,3 +209,36 @@ async def research_stream(websocket: WebSocket, session_id: str):
         })
     finally:
         await websocket.close()
+
+
+@router.get("/download/{filename}")
+async def download_exported_file(filename: str):
+    """
+    Download an exported research report file.
+
+    Args:
+        filename: Name of the exported file
+
+    Returns:
+        FileResponse with the requested file
+
+    Raises:
+        HTTPException: If file not found or invalid filename
+    """
+    # Security: Only allow files from the export directory, prevent path traversal
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    file_path = Path(settings.export_directory) / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=400, detail="Invalid file")
+
+    return FileResponse(
+        path=str(file_path),
+        filename=filename,
+        media_type="application/octet-stream"
+    )
