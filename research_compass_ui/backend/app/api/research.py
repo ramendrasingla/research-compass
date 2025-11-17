@@ -255,6 +255,33 @@ async def research_stream(websocket: WebSocket, session_id: str):
         print(f"   Total events: {len(all_events)}")
         print(f"   Accumulated data keys: {list(accumulated_data.keys())}")
 
+        # Check if research failed
+        if accumulated_data.get("research_failed"):
+            error_message = accumulated_data.get("research_error", "All researchers failed to complete.")
+            print(f"❌ Research failed: {error_message}")
+
+            # Send error to client
+            await websocket.send_json({
+                "type": "error",
+                "stage": "failed",
+                "message": error_message,
+            })
+
+            # Update session status to failed
+            session_store.update_session(
+                session_id,
+                status="failed",
+                result={"error": error_message},
+            )
+
+            # Send completion with error
+            await websocket.send_json({
+                "type": "complete",
+                "status": "failed",
+                "error": error_message,
+            })
+            return
+
         if accumulated_data:
             # Try to extract from accumulated data
             # Convert exported_files dict to list of filenames

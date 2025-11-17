@@ -326,11 +326,35 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig) -> Co
                 print(f"✅ All researchers completed! Got {len(tool_results)} results")
 
                 # Check for exceptions in results
+                successful_count = 0
+                failed_count = 0
                 for i, result in enumerate(tool_results):
                     if isinstance(result, Exception):
                         print(f"❌ Researcher {i+1} FAILED with exception: {type(result).__name__}: {str(result)}")
+                        failed_count += 1
                     else:
                         print(f"✅ Researcher {i+1} succeeded")
+                        successful_count += 1
+
+                # If ALL researchers failed, abort the research process
+                if successful_count == 0 and failed_count > 0:
+                    print(f"\n❌ CRITICAL: All {failed_count} researchers failed!")
+                    print(f"❌ Cannot generate report without any successful research.")
+                    print(f"❌ Aborting research process.\n")
+                    # Store error information in state
+                    error_messages = []
+                    for i, result in enumerate(tool_results):
+                        if isinstance(result, Exception):
+                            error_messages.append(f"Researcher {i+1}: {type(result).__name__}: {str(result)}")
+
+                    return Command(
+                        goto=END,
+                        update={
+                            "supervisor_messages": all_tool_messages,
+                            "research_failed": True,
+                            "research_error": f"All researchers failed. Errors: {'; '.join(error_messages)}"
+                        }
+                    )
             except Exception as e:
                 print(f"❌ CRITICAL ERROR waiting for researchers: {type(e).__name__}: {str(e)}")
                 import traceback

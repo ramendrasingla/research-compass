@@ -59,9 +59,11 @@ export interface WebSocketMessage {
   stage?: string
   event?: string
   message?: string
+  error?: string  // Error message when research fails
   result?: {
     final_report?: string
     exported_files?: string[]
     sources?: PaperSource[]
+    error?: string  // Error message in result
   }
 }

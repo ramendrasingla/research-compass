@@ -89,6 +89,8 @@ class AgentState(MessagesState):
     exported_files: dict[str, str] = {}
     sources: Annotated[list[PaperSource], operator.add] = []
     diagram_specifications: list[dict] = []
+    research_failed: bool = False  # Indicates if all researchers failed
+    research_error: Optional[str] = None  # Error message if research failed
 
 class SupervisorState(TypedDict):
     """State for the supervisor that manages research tasks."""
@@ -97,6 +99,8 @@ class SupervisorState(TypedDict):
     research_brief: str
     notes: Annotated[list[str], override_reducer] = []
     research_iterations: int = 0
+    research_failed: bool = False  # Indicates if all researchers failed
+    research_error: Optional[str] = None  # Error message if research failed
     raw_notes: Annotated[list[str], override_reducer] = []
     sources: Annotated[list[PaperSource], operator.add] = []
 

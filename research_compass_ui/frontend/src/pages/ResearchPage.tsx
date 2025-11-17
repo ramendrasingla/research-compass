@@ -326,16 +326,36 @@ export default function ResearchPage() {
       }
 
       // Handle completion
-      if (message.type === 'complete' && message.result) {
-        // Mark all steps as completed
-        setSteps(prev => prev.map(step => ({ ...step, status: 'completed' as const })))
-        setIsComplete(true)
+      if (message.type === 'complete') {
+        // Check if research failed
+        if (message.status === 'failed' || message.error) {
+          console.error('❌ Research failed:', message.error || message.message)
+          // Mark all steps up to research as completed, but research as error
+          setSteps(prev => prev.map(step => {
+            if (step.id === 'research') return { ...step, status: 'error' as const }
+            if (step.id === 'init' || step.id === 'brief') return { ...step, status: 'completed' as const }
+            return { ...step, status: 'pending' as const }
+          }))
+          setSession((prev) => prev ? {
+            ...prev,
+            status: 'failed',
+            result: { error: message.error || message.message || 'Research failed' },
+          } : null)
+          return
+        }
 
-        setSession((prev) => prev ? {
-          ...prev,
-          status: 'completed',
-          result: message.result,
-        } : null)
+        // Success case
+        if (message.result) {
+          // Mark all steps as completed
+          setSteps(prev => prev.map(step => ({ ...step, status: 'completed' as const })))
+          setIsComplete(true)
+
+          setSession((prev) => prev ? {
+            ...prev,
+            status: 'completed',
+            result: message.result,
+          } : null)
+        }
       }
 
       // Handle errors
@@ -621,7 +641,31 @@ export default function ResearchPage() {
                 Research Report
               </h2>
 
-              {!session.result?.final_report ? (
+              {/* Error state - research failed */}
+              {session.status === 'failed' || session.result?.error ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <XCircle className="w-16 h-16 text-red-500 mb-4" />
+                  <h3 className="text-xl font-semibold text-gray-900 mb-2">Research Failed</h3>
+                  <p className="text-gray-600 max-w-2xl mb-4">
+                    {session.result?.error || 'All researchers failed to complete. This may be due to rate limits, network issues, or other errors.'}
+                  </p>
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-w-2xl text-left">
+                    <p className="text-sm font-medium text-red-800 mb-2">Common solutions:</p>
+                    <ul className="text-sm text-red-700 list-disc list-inside space-y-1">
+                      <li>Switch to gpt-4o-mini model (faster, higher rate limits, cheaper)</li>
+                      <li>Reduce max iterations or concurrent researchers</li>
+                      <li>Wait a few minutes and try again if rate limited</li>
+                      <li>Check your OpenAI API key has sufficient credits</li>
+                    </ul>
+                  </div>
+                  <button
+                    onClick={() => navigate('/')}
+                    className="mt-6 btn-primary"
+                  >
+                    Start New Research
+                  </button>
+                </div>
+              ) : !session.result?.final_report ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <Loader2 className="w-12 h-12 animate-spin text-primary-600 mb-4" />
                   <p className="text-gray-600">
