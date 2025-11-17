@@ -1,3 +1,18 @@
+export interface PaperSource {
+  source_id: string
+  paper_id?: string
+  title: string
+  authors: string[]
+  abstract: string
+  url: string
+  pdf_url?: string
+  published_date?: string
+  citation_count?: number
+  venue?: string
+  search_api: string
+  accessed_at: string
+}
+
 export interface ResearchConfig {
   query: string
   search_api: string
@@ -22,6 +37,7 @@ export interface SessionDetail extends SessionInfo {
   result?: {
     final_report?: string
     exported_files?: string[]
+    sources?: PaperSource[]
   }
 }
 
@@ -46,5 +62,6 @@ export interface WebSocketMessage {
   result?: {
     final_report?: string
     exported_files?: string[]
+    sources?: PaperSource[]
   }
 }

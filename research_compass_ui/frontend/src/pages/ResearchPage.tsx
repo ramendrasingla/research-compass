@@ -7,6 +7,7 @@ import { apiClient } from '../utils/api'
 import type { SessionDetail, WebSocketMessage } from '../types'
 import ResearchTreeGraph from '../components/ResearchTreeGraph'
 import ResearchDetailModal from '../components/ResearchDetailModal'
+import { SourceLibrary } from '../components/SourceLibrary'
 
 interface ResearchStep {
   id: string
@@ -100,7 +101,10 @@ export default function ResearchPage() {
     } else if (eventStr.includes("'write_research_brief'")) {
       updateStep('init', 'completed')
       updateStep('brief', 'active')
-    } else if (eventStr.includes("'research_supervisor'")) {
+    } else if (eventStr.includes("'research_supervisor'") ||
+               eventStr.includes("'researcher'") ||
+               eventStr.includes("'compress_research'") ||
+               eventStr.includes("'supervisor_tools'")) {
       updateStep('brief', 'completed')
       updateStep('research', 'active')
     } else if (eventStr.includes("'final_report_generation'")) {
@@ -527,10 +531,10 @@ export default function ResearchPage() {
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Progress Panel */}
-          <div className="lg:col-span-1">
+      <div className="max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Progress Panel - Left Sidebar */}
+          <div className="lg:w-80 flex-shrink-0">
             <div className="card sticky top-32">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">
                 Research Progress
@@ -610,8 +614,8 @@ export default function ResearchPage() {
             </div>
           </div>
 
-          {/* Report Panel */}
-          <div className="lg:col-span-2">
+          {/* Report Panel - Center */}
+          <div className="flex-1 min-w-0">
             <div className="card">
               <h2 className="text-lg font-semibold text-gray-900 mb-6">
                 Research Report
@@ -693,6 +697,18 @@ export default function ResearchPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Source Library - Right Sidebar */}
+          <div className="lg:w-96 flex-shrink-0">
+            <div className="sticky top-32 h-[calc(100vh-10rem)]">
+              <div className="h-full bg-white rounded-lg shadow overflow-hidden">
+                <SourceLibrary
+                  sources={session.result?.sources || []}
+                  isLoading={!isComplete && session.status !== 'completed'}
+                />
+              </div>
             </div>
           </div>
         </div>

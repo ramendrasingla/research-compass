@@ -16,11 +16,11 @@ export default function HomePage() {
   const [exportFormats, setExportFormats] = useState<ExportFormat[]>([])
 
   // Form state
-  const [selectedSearchAPI, setSelectedSearchAPI] = useState('arxiv')
-  const [selectedResearchModel, setSelectedResearchModel] = useState('openai:gpt-4o')
+  const [selectedSearchAPI, setSelectedSearchAPI] = useState('all')
+  const [selectedResearchModel, setSelectedResearchModel] = useState('openai:gpt-4o-mini')  // Changed to mini - avoids rate limits & saves tokens
   const [selectedSummarizationModel, setSelectedSummarizationModel] = useState('openai:gpt-4o-mini')
-  const [maxIterations, setMaxIterations] = useState(6)
-  const [maxConcurrentUnits, setMaxConcurrentUnits] = useState(5)
+  const [maxIterations, setMaxIterations] = useState(2)  // Reduced to save tokens
+  const [maxConcurrentUnits, setMaxConcurrentUnits] = useState(2)  // Reduced to save tokens
   const [selectedExportFormats, setSelectedExportFormats] = useState<string[]>([])
   const [allowClarification, setAllowClarification] = useState(false)
 
@@ -208,11 +208,12 @@ export default function HomePage() {
                   </label>
                   <input
                     type="range"
-                    min="1"
+                    min="2"
                     max="15"
                     value={maxIterations}
                     onChange={(e) => setMaxIterations(parseInt(e.target.value))}
                     className="w-full"
+                    title="Minimum 2 iterations required (1 for planning, 1+ for research)"
                   />
                 </div>
 

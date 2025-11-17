@@ -1,6 +1,6 @@
 """Pydantic models for API requests and responses."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -9,13 +9,30 @@ class ResearchRequest(BaseModel):
     """Request model for starting a research session."""
 
     query: str
-    search_api: str = "arxiv"
-    research_model: str = "openai:gpt-4o"
+    search_api: str = "all"  # Default to searching all APIs for comprehensive coverage
+    research_model: str = "openai:gpt-4o-mini"  # Using mini to avoid rate limits & save tokens
     summarization_model: str = "openai:gpt-4o-mini"
-    max_researcher_iterations: int = 6
-    max_concurrent_research_units: int = 5
+    max_researcher_iterations: int = 2  # Minimum: 1 for planning + 1 for research (reduced to save tokens)
+    max_concurrent_research_units: int = 2  # Fewer parallel researchers to save tokens
     export_formats: List[str] = []
     allow_clarification: bool = True
+
+
+class PaperSource(BaseModel):
+    """Metadata for a research paper source."""
+
+    source_id: str
+    paper_id: Optional[str] = None
+    title: str
+    authors: List[str] = []
+    abstract: str = ""
+    url: str
+    pdf_url: Optional[str] = None
+    published_date: Optional[str] = None
+    citation_count: Optional[int] = None
+    venue: Optional[str] = None
+    search_api: str
+    accessed_at: str
 
 
 class SessionInfo(BaseModel):
@@ -29,6 +46,14 @@ class SessionInfo(BaseModel):
     config: Dict[str, Any]
 
 
+class ResearchResult(BaseModel):
+    """Research session result data."""
+
+    final_report: str
+    exported_files: List[str] = []
+    sources: List[PaperSource] = []
+
+
 class SessionDetail(BaseModel):
     """Detailed information about a research session including results."""
 
@@ -38,7 +63,7 @@ class SessionDetail(BaseModel):
     created_at: str
     updated_at: str
     config: Dict[str, Any]
-    result: Dict[str, Any] | None = None
+    result: ResearchResult | None = None
 
 
 class HealthResponse(BaseModel):

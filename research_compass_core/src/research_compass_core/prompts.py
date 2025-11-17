@@ -143,12 +143,12 @@ You can use any of the tools provided to you to find resources that can help ans
 </Task>
 
 <Available Tools>
-You have access to two main tools:
-1. **tavily_search**: For conducting web searches to gather information
-2. **think_tool**: For reflection and strategic planning during research
-{mcp_prompt}
+You have access to these research tools:
+1. **arxiv_search**: Search arXiv for academic research papers (physics, CS, math, etc.)
+2. **semantic_scholar_search**: Search Semantic Scholar for academic papers across 200M+ papers from all disciplines
+3. **think_tool**: For reflection and strategic planning during research
 
-**CRITICAL: Use think_tool after each search to reflect on results and plan next steps. Do not call think_tool with the tavily_search or any other tools. It should be to reflect on the results of the search.**
+**CRITICAL: Use think_tool after each search to reflect on results and plan next steps. Do not call think_tool with the search tools. It should be used to reflect on the results of the search.**
 </Available Tools>
 
 <Instructions>
@@ -245,12 +245,21 @@ Here are the findings from the research that you conducted:
 {findings}
 </Findings>
 
+Here are the structured sources that were used in the research:
+<Available Sources>
+{sources}
+</Available Sources>
+
+IMPORTANT: You MUST use ONLY the sources listed above in your citations. Each source has been assigned a number [1], [2], [3], etc.
+When citing information in your report, use the number assigned to each source (e.g., "According to recent research [1], ...").
+Do NOT create new sources or cite sources that are not in the list above.
+
 Please create a detailed answer to the overall research brief that:
 1. Is well-organized with proper headings (# for title, ## for sections, ### for subsections)
 2. Includes specific facts and insights from the research
-3. References relevant sources using [Title](URL) format
+3. References sources using ONLY the numbered citations from the Available Sources list above (e.g., [1], [2], [3])
 4. Provides a balanced, thorough analysis. Be as comprehensive as possible, and include all information that is relevant to the overall research question. People are using you for deep research and will expect detailed, comprehensive answers.
-5. Includes a "Sources" section at the end with all referenced links
+5. Includes a "### Sources" section at the end that lists all sources you cited, using the EXACT numbering and information from the Available Sources list above
 
 You can structure your report in a number of different ways. Here are some examples:
 
@@ -296,15 +305,95 @@ Make sure the final answer report is in the SAME language as the human messages 
 Format the report in clear markdown with proper structure and include source references where appropriate.
 
 <Citation Rules>
-- Assign each unique URL a single citation number in your text
-- End with ### Sources that lists each source with corresponding numbers
-- IMPORTANT: Number sources sequentially without gaps (1,2,3,4...) in the final list regardless of which sources you choose
-- Each source should be a separate line item in a list, so that in markdown it is rendered as a list.
-- Example format:
-  [1] Source Title: URL
-  [2] Source Title: URL
-- Citations are extremely important. Make sure to include these, and pay a lot of attention to getting these right. Users will often use these citations to look into more information.
+- CRITICAL: Use ONLY the sources from the "Available Sources" list provided above
+- Each source already has a number assigned [1], [2], [3], etc. - use these exact numbers in your citations
+- When you cite information in the text, use the source number in square brackets: [1], [2], etc.
+- End your report with "### Sources" section
+- In the Sources section, copy the EXACT source entries from the Available Sources list for any sources you cited
+- Only include sources you actually referenced in the report
+- Keep the same numbering as in the Available Sources list (e.g., if you cite [1] and [5], list them as [1] and [5], not [1] and [2])
+- Format each source as: [number] Title - URL
+- Example:
+  ### Sources
+  [1] Paper Title Here - https://arxiv.org/abs/1234.5678
+  [3] Another Paper Title - https://arxiv.org/abs/9876.5432
+- Citations are extremely important. Users rely on these to verify information and explore topics further.
 </Citation Rules>
+
+<Diagram Specifications>
+{diagram_specifications}
+
+Based on the diagram specifications above, create mermaid diagrams and include them in the appropriate sections of your report.
+
+For each diagram specification:
+1. Create a valid mermaid diagram that accurately represents the concepts and relationships described
+2. Place the diagram inline within the relevant section (not in an appendix)
+3. Add the diagram's title as a caption immediately after the diagram
+4. Ensure the diagram enhances the written explanation (don't replace text with diagrams)
+
+<Mermaid Diagram Reference>
+
+**Flowchart Syntax** (for processes, decisions, workflows):
+```mermaid
+graph TD
+    A[Start Node] --> B{{Decision Point}}
+    B -->|Option 1| C[Action 1]
+    B -->|Option 2| D[Action 2]
+    C --> E[End]
+    D --> E
+```
+
+**Mind Map Syntax** (for concept relationships):
+```mermaid
+mindmap
+  root((Central Concept))
+    Branch 1
+      Sub-concept 1.1
+      Sub-concept 1.2
+    Branch 2
+      Sub-concept 2.1
+      Sub-concept 2.2
+```
+
+**Sequence Diagram Syntax** (for interactions):
+```mermaid
+sequenceDiagram
+    participant A as Entity A
+    participant B as Entity B
+    A->>B: Message 1
+    B->>A: Response
+    A->>B: Message 2
+```
+
+**Timeline Syntax** (for chronological events):
+```mermaid
+timeline
+    title Evolution of Topic
+    2010 : Event 1
+    2015 : Event 2
+    2020 : Event 3
+```
+
+**Class Diagram Syntax** (for hierarchies/structures):
+```mermaid
+classDiagram
+    Parent <|-- Child1
+    Parent <|-- Child2
+    Parent : +attribute
+    Child1 : +specific_attribute
+```
+
+</Mermaid Diagram Reference>
+
+<Diagram Placement Guidelines>
+- Only create diagrams that were specified in the diagram specifications above
+- Do not create additional diagrams beyond what was specified
+- Place each diagram in the section indicated in its specification
+- Use the exact diagram type specified (flowchart, mindmap, sequence, timeline, or hierarchy)
+- Include all concepts mentioned in the specification's "concepts" list
+- Use the description to understand how nodes should be connected
+- Add the diagram's title as italic text below the diagram: *Figure N: [Title]*
+</Diagram Placement Guidelines>
 """
 
 

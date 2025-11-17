@@ -51,7 +51,7 @@ class HTMLExporter(BaseExporter):
                 extensions=['extra', 'codehilite', 'tables', 'toc']
             )
 
-            # Wrap in a styled HTML template
+            # Wrap in a styled HTML template with mermaid support
             html_template = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -82,6 +82,15 @@ class HTMLExporter(BaseExporter):
             border-radius: 5px;
             overflow-x: auto;
         }}
+        /* Mermaid diagram styling */
+        .mermaid {{
+            text-align: center;
+            margin: 30px 0;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }}
         a {{ color: #3498db; text-decoration: none; }}
         a:hover {{ text-decoration: underline; }}
         blockquote {{
@@ -105,6 +114,20 @@ class HTMLExporter(BaseExporter):
             color: white;
         }}
     </style>
+    <!-- Mermaid.js for diagram rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        // Initialize mermaid with configuration
+        mermaid.initialize({{
+            startOnLoad: true,
+            theme: 'default',
+            securityLevel: 'loose',
+            flowchart: {{ useMaxWidth: true, htmlLabels: true }},
+            sequence: {{ useMaxWidth: true }},
+            mindmap: {{ useMaxWidth: true }},
+            timeline: {{ useMaxWidth: true }}
+        }});
+    </script>
 </head>
 <body>
 {html_body}
@@ -126,11 +149,61 @@ class HTMLExporter(BaseExporter):
 class PDFExporter(BaseExporter):
     """Export report as PDF file."""
 
+    def _convert_mermaid_to_placeholder(self, content: str) -> str:
+        """Convert mermaid code blocks to styled placeholders for PDF export.
+
+        Since WeasyPrint doesn't execute JavaScript, mermaid diagrams won't render.
+        This converts them to styled placeholder boxes that indicate a diagram exists.
+        For actual diagram rendering in PDF, use HTML export or implement playwright rendering.
+        """
+        import re
+
+        # Find all mermaid code blocks
+        mermaid_pattern = r'```mermaid\n(.*?)\n```'
+        matches = list(re.finditer(mermaid_pattern, content, re.DOTALL))
+
+        if not matches:
+            return content
+
+        # Replace each mermaid block with a styled placeholder
+        for match in reversed(matches):  # Reverse to maintain string positions
+            mermaid_code = match.group(1)
+
+            # Extract diagram type from first line
+            first_line = mermaid_code.strip().split('\n')[0]
+            diagram_type = "Diagram"
+            if 'graph' in first_line or 'flowchart' in first_line:
+                diagram_type = "Flowchart"
+            elif 'mindmap' in first_line:
+                diagram_type = "Mind Map"
+            elif 'sequence' in first_line:
+                diagram_type = "Sequence Diagram"
+            elif 'timeline' in first_line:
+                diagram_type = "Timeline"
+            elif 'class' in first_line:
+                diagram_type = "Class Diagram"
+
+            # Create placeholder HTML
+            placeholder = f'''
+<div style="border: 2px dashed #999; padding: 20px; margin: 20px 0; background-color: #f9f9f9; text-align: center;">
+    <p style="font-weight: bold; font-size: 1.1em; margin: 0 0 10px 0;">📊 {diagram_type}</p>
+    <p style="color: #666; font-size: 0.9em; margin: 0;">
+        (View HTML export to see interactive diagram)
+    </p>
+</div>'''
+
+            content = content[:match.start()] + placeholder + content[match.end():]
+
+        return content
+
     async def export(self, content: str, output_path: str) -> str:
         """Convert markdown to PDF via HTML intermediate."""
         try:
             import markdown
             from weasyprint import HTML
+
+            # Convert mermaid blocks to placeholders (WeasyPrint doesn't support JS rendering)
+            content = self._convert_mermaid_to_placeholder(content)
 
             # First convert markdown to HTML
             html_body = markdown.markdown(

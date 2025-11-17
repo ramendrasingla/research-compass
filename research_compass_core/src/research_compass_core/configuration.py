@@ -9,12 +9,14 @@ from pydantic import BaseModel, Field
 
 
 class SearchAPI(Enum):
-    """Enumeration of available search API providers."""
+    """Enumeration of available research paper search API providers.
 
-    OPENAI = "openai"
+    Only academic/research sources are supported to ensure high-quality citations.
+    """
+
     ARXIV = "arxiv"
     SEMANTIC_SCHOLAR = "semantic_scholar"
-    NONE = "none"
+    ALL = "all"  # Use all available research APIs (ArXiv + Semantic Scholar) - Default
 
 
 class ExportFormat(Enum):
@@ -55,7 +57,7 @@ class Configuration(BaseModel):
     search_api: SearchAPI = Field(
         default=SearchAPI.ARXIV,
         metadata={
-            "description": "Search API to use for research. Options: openai (native web search), arxiv (academic papers only), semantic_scholar (200M+ papers, all disciplines), none"
+            "description": "Search API to use for research. Options: arxiv (academic papers only), semantic_scholar (200M+ papers, all disciplines), all (both ArXiv and Semantic Scholar - recommended)"
         }
     )
     max_researcher_iterations: int = Field(
@@ -91,9 +93,9 @@ class Configuration(BaseModel):
         }
     )
     research_model: str = Field(
-        default="openai:gpt-4.1",
+        default="openai:gpt-4o-mini",
         metadata={
-            "description": "Model for conducting research. NOTE: Make sure your Researcher Model supports the selected search API."
+            "description": "Model for conducting research. Using gpt-4o-mini to avoid rate limits and save tokens."
         }
     )
     research_model_max_tokens: int = Field(

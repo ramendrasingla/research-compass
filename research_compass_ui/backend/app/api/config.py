@@ -43,24 +43,19 @@ async def get_available_search_apis() -> SearchAPIListResponse:
     return SearchAPIListResponse(
         search_apis=[
             SearchAPIInfo(
+                id="all",
+                name="All Research Sources (Recommended)",
+                description="Search both ArXiv and Semantic Scholar for comprehensive academic coverage",
+            ),
+            SearchAPIInfo(
                 id="arxiv",
-                name="ArXiv",
-                description="Academic papers in CS, physics, mathematics",
+                name="ArXiv Only",
+                description="Research papers in CS, physics, mathematics, and related fields",
             ),
             SearchAPIInfo(
                 id="semantic_scholar",
-                name="Semantic Scholar",
-                description="200M+ papers across all disciplines",
-            ),
-            SearchAPIInfo(
-                id="openai",
-                name="OpenAI Web Search",
-                description="General web search via OpenAI",
-            ),
-            SearchAPIInfo(
-                id="none",
-                name="None",
-                description="No search (custom tools only)",
+                name="Semantic Scholar Only",
+                description="200M+ peer-reviewed research papers across all academic disciplines",
             ),
         ]
     )

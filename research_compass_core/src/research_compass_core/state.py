@@ -42,10 +42,26 @@ class ClarifyWithUser(BaseModel):
 
 class ResearchQuestion(BaseModel):
     """Research question and brief for guiding research."""
-    
+
     research_brief: str = Field(
         description="A research question that will be used to guide the research.",
     )
+
+class PaperSource(BaseModel):
+    """Structured metadata for a research paper/source."""
+
+    source_id: str = Field(description="Unique identifier for this source")
+    paper_id: Optional[str] = Field(default=None, description="ArXiv ID or Semantic Scholar ID")
+    title: str = Field(description="Paper title")
+    authors: list[str] = Field(default_factory=list, description="List of authors")
+    abstract: str = Field(default="", description="Paper abstract")
+    url: str = Field(description="URL to the paper")
+    pdf_url: Optional[str] = Field(default=None, description="Direct PDF URL if available")
+    published_date: Optional[str] = Field(default=None, description="Publication date")
+    citation_count: Optional[int] = Field(default=None, description="Number of citations")
+    venue: Optional[str] = Field(default=None, description="Publication venue")
+    search_api: str = Field(description="Source API: 'arxiv' or 'semantic_scholar'")
+    accessed_at: str = Field(description="Timestamp when source was retrieved")
 
 
 ###################
@@ -71,27 +87,32 @@ class AgentState(MessagesState):
     notes: Annotated[list[str], override_reducer] = []
     final_report: str
     exported_files: dict[str, str] = {}
+    sources: Annotated[list[PaperSource], operator.add] = []
+    diagram_specifications: list[dict] = []
 
 class SupervisorState(TypedDict):
     """State for the supervisor that manages research tasks."""
-    
+
     supervisor_messages: Annotated[list[MessageLikeRepresentation], override_reducer]
     research_brief: str
     notes: Annotated[list[str], override_reducer] = []
     research_iterations: int = 0
     raw_notes: Annotated[list[str], override_reducer] = []
+    sources: Annotated[list[PaperSource], operator.add] = []
 
 class ResearcherState(TypedDict):
     """State for individual researchers conducting research."""
-    
+
     researcher_messages: Annotated[list[MessageLikeRepresentation], operator.add]
     tool_call_iterations: int = 0
     research_topic: str
     compressed_research: str
     raw_notes: Annotated[list[str], override_reducer] = []
+    sources: Annotated[list[PaperSource], operator.add] = []
 
 class ResearcherOutputState(BaseModel):
     """Output state from individual researchers."""
-    
+
     compressed_research: str
     raw_notes: Annotated[list[str], override_reducer] = []
+    sources: list[PaperSource] = []

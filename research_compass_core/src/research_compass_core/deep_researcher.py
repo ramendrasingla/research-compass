@@ -236,22 +236,38 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig) -> Co
     Returns:
         Command to either continue supervision loop or end research phase
     """
+    print("\n" + "="*80)
+    print("🎯 SUPERVISOR_TOOLS CALLED!")
+    print("="*80)
+
     # Step 1: Extract current state and check exit conditions
     configurable = Configuration.from_runnable_config(config)
     supervisor_messages = state.get("supervisor_messages", [])
     research_iterations = state.get("research_iterations", 0)
     most_recent_message = supervisor_messages[-1]
-    
+
+    # Debug: Print tool calls
+    tool_call_names = [tc["name"] for tc in most_recent_message.tool_calls] if most_recent_message.tool_calls else []
+    print(f"🔍 Tool calls made: {tool_call_names}")
+    print(f"🔍 Research iteration: {research_iterations}/{configurable.max_researcher_iterations}")
+
     # Define exit criteria for research phase
     exceeded_allowed_iterations = research_iterations > configurable.max_researcher_iterations
     no_tool_calls = not most_recent_message.tool_calls
     research_complete_tool_call = any(
-        tool_call["name"] == "ResearchComplete" 
+        tool_call["name"] == "ResearchComplete"
         for tool_call in most_recent_message.tool_calls
     )
-    
+
+    print(f"🔍 Exit conditions:")
+    print(f"   - exceeded_iterations: {exceeded_allowed_iterations}")
+    print(f"   - no_tool_calls: {no_tool_calls}")
+    print(f"   - research_complete: {research_complete_tool_call}")
+
     # Exit if any termination condition is met
     if exceeded_allowed_iterations or no_tool_calls or research_complete_tool_call:
+        print(f"⚠️  EXITING EARLY - Research complete")
+        print("="*80 + "\n")
         return Command(
             goto=END,
             update={
@@ -280,11 +296,14 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig) -> Co
     
     # Handle ConductResearch calls (research delegation)
     conduct_research_calls = [
-        tool_call for tool_call in most_recent_message.tool_calls 
+        tool_call for tool_call in most_recent_message.tool_calls
         if tool_call["name"] == "ConductResearch"
     ]
-    
+
+    print(f"🔍 Found {len(conduct_research_calls)} ConductResearch calls")
+
     if conduct_research_calls:
+        print(f"✅ EXECUTING RESEARCH DELEGATION - Creating {len(conduct_research_calls)} researchers")
         try:
             # Limit concurrent research units to prevent resource exhaustion
             allowed_conduct_research_calls = conduct_research_calls[:configurable.max_concurrent_research_units]
@@ -300,13 +319,41 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig) -> Co
                 }, config) 
                 for tool_call in allowed_conduct_research_calls
             ]
-            
-            tool_results = await asyncio.gather(*research_tasks)
-            
+
+            print(f"⏳ Waiting for {len(research_tasks)} researchers to complete...")
+            try:
+                tool_results = await asyncio.gather(*research_tasks, return_exceptions=True)
+                print(f"✅ All researchers completed! Got {len(tool_results)} results")
+
+                # Check for exceptions in results
+                for i, result in enumerate(tool_results):
+                    if isinstance(result, Exception):
+                        print(f"❌ Researcher {i+1} FAILED with exception: {type(result).__name__}: {str(result)}")
+                    else:
+                        print(f"✅ Researcher {i+1} succeeded")
+            except Exception as e:
+                print(f"❌ CRITICAL ERROR waiting for researchers: {type(e).__name__}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                raise
+
+            # Debug: Check what's in the results
+            for i, result in enumerate(tool_results):
+                if not isinstance(result, Exception):
+                    print(f"   Researcher {i+1} result keys: {list(result.keys())}")
+                    print(f"   Researcher {i+1} has 'sources' key: {'sources' in result}")
+                    if 'sources' in result:
+                        print(f"   Researcher {i+1} sources count: {len(result.get('sources', []))}")
+
             # Create tool messages with research results
             for observation, tool_call in zip(tool_results, allowed_conduct_research_calls):
+                if isinstance(observation, Exception):
+                    content = f"Research failed with error: {type(observation).__name__}: {str(observation)}"
+                else:
+                    content = observation.get("compressed_research", "Error synthesizing research report: Maximum retries exceeded")
+
                 all_tool_messages.append(ToolMessage(
-                    content=observation.get("compressed_research", "Error synthesizing research report: Maximum retries exceeded"),
+                    content=content,
                     name=tool_call["name"],
                     tool_call_id=tool_call["id"]
                 ))
@@ -319,14 +366,40 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig) -> Co
                     tool_call_id=overflow_call["id"]
                 ))
             
-            # Aggregate raw notes from all research results
+            # Aggregate raw notes from all research results (skip exceptions)
             raw_notes_concat = "\n".join([
-                "\n".join(observation.get("raw_notes", [])) 
+                "\n".join(observation.get("raw_notes", []))
                 for observation in tool_results
+                if not isinstance(observation, Exception)
             ])
-            
+
             if raw_notes_concat:
                 update_payload["raw_notes"] = [raw_notes_concat]
+
+            # Aggregate sources from all research results
+            all_sources = []
+            print(f"\n🔗 SUPERVISOR: Aggregating sources from {len(tool_results)} researchers")
+            for i, observation in enumerate(tool_results):
+                if isinstance(observation, Exception):
+                    print(f"🔗 SUPERVISOR: Researcher {i+1} SKIPPED (exception)")
+                    continue
+
+                sources = observation.get("sources", [])
+                print(f"🔗 SUPERVISOR: Researcher {i+1} has {len(sources)} sources")
+                if sources:
+                    all_sources.extend(sources)
+
+            # Debug logging
+            import logging
+            print(f"🔗 SUPERVISOR: Total aggregated sources: {len(all_sources)}")
+            logging.info(f"Supervisor aggregated {len(all_sources)} sources from {len(tool_results)} researchers")
+            if all_sources:
+                print(f"🔗 SUPERVISOR: First source: {all_sources[0].title if hasattr(all_sources[0], 'title') else all_sources[0]}")
+                logging.info(f"First aggregated source: {all_sources[0].title if hasattr(all_sources[0], 'title') else all_sources[0]}")
+
+            if all_sources:
+                print(f"🔗 SUPERVISOR: Adding {len(all_sources)} sources to state update")
+                update_payload["sources"] = all_sources
                 
         except Exception as e:
             # Handle research execution errors
@@ -375,6 +448,8 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> Command[
     Returns:
         Command to proceed to researcher_tools for tool execution
     """
+    print(f"\n👨‍🔬 RESEARCHER NODE CALLED for topic: {state.get('research_topic', 'Unknown')[:50]}")
+
     # Step 1: Load configuration and validate tool availability
     configurable = Configuration.from_runnable_config(config)
     researcher_messages = state.get("researcher_messages", [])
@@ -395,9 +470,8 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> Command[
         "tags": ["langsmith:nostream"]
     }
     
-    # Prepare system prompt with MCP context if available
+    # Prepare system prompt
     researcher_prompt = research_system_prompt.format(
-        mcp_prompt=configurable.mcp_prompt or "", 
         date=get_today_str()
     )
     
@@ -414,11 +488,16 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> Command[
     response = await research_model.ainvoke(messages)
     
     # Step 4: Update state and proceed to tool execution
+    # Only increment iteration count for actual search/action tools, not think_tool
+    tool_calls = response.tool_calls if hasattr(response, 'tool_calls') else []
+    has_non_think_tools = any(call["name"] != "think_tool" for call in tool_calls) if tool_calls else False
+    iteration_increment = 1 if has_non_think_tools else 0
+
     return Command(
         goto="researcher_tools",
         update={
             "researcher_messages": [response],
-            "tool_call_iterations": state.get("tool_call_iterations", 0) + 1
+            "tool_call_iterations": state.get("tool_call_iterations", 0) + iteration_increment
         }
     )
 
@@ -506,11 +585,11 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> Co
 
 async def compress_research(state: ResearcherState, config: RunnableConfig):
     """Compress and synthesize research findings into a concise, structured summary.
-    
+
     This function takes all the research findings, tool outputs, and AI messages from
     a researcher's work and distills them into a clean, comprehensive summary while
     preserving all important information and findings.
-    
+
     Args:
         state: Current researcher state with accumulated research messages
         config: Runtime configuration with compression model settings
@@ -518,6 +597,10 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
     Returns:
         Dictionary containing compressed research summary and raw notes
     """
+    print("\n" + "="*80)
+    print("🎯 COMPRESS_RESEARCH CALLED!")
+    print("="*80)
+
     # Step 1: Configure the compression model
     configurable = Configuration.from_runnable_config(config)
     synthesizer_model = configurable_model.with_config({
@@ -548,14 +631,28 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
             
             # Extract raw notes from all tool and AI messages
             raw_notes_content = "\n".join([
-                str(message.content) 
+                str(message.content)
                 for message in filter_messages(researcher_messages, include_types=["tool", "ai"])
             ])
-            
+
+            # Extract sources from tool messages
+            from research_compass_core.utils import extract_sources_from_messages
+            print(f"\n🔍 COMPRESS_RESEARCH: About to extract sources from {len(researcher_messages)} messages")
+            sources = extract_sources_from_messages(researcher_messages)
+            print(f"🔍 COMPRESS_RESEARCH: Extracted {len(sources)} sources")
+
+            # Debug logging
+            import logging
+            logging.info(f"Extracted {len(sources)} sources from researcher messages")
+            if sources:
+                print(f"🔍 COMPRESS_RESEARCH: First source: {sources[0].title}")
+                logging.info(f"First source: {sources[0].title if sources else 'None'}")
+
             # Return successful compression result
             return {
                 "compressed_research": str(response.content),
-                "raw_notes": [raw_notes_content]
+                "raw_notes": [raw_notes_content],
+                "sources": sources
             }
             
         except Exception as e:
@@ -571,13 +668,18 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
     
     # Step 4: Return error result if all attempts failed
     raw_notes_content = "\n".join([
-        str(message.content) 
+        str(message.content)
         for message in filter_messages(researcher_messages, include_types=["tool", "ai"])
     ])
-    
+
+    # Extract sources even on error
+    from research_compass_core.utils import extract_sources_from_messages
+    sources = extract_sources_from_messages(researcher_messages)
+
     return {
         "compressed_research": "Error synthesizing research report: Maximum retries exceeded",
-        "raw_notes": [raw_notes_content]
+        "raw_notes": [raw_notes_content],
+        "sources": sources
     }
 
 # Researcher Subgraph Construction
@@ -600,6 +702,158 @@ researcher_builder.add_edge("compress_research", END)      # Exit point after co
 # Compile researcher subgraph for parallel execution by supervisor
 researcher_subgraph = researcher_builder.compile()
 
+async def analyze_diagrams(state: AgentState, config: RunnableConfig):
+    """Analyze research findings and strategically identify where diagrams would enhance understanding.
+
+    The supervisor reviews all compressed research notes and decides where visual diagrams
+    (flowcharts, mindmaps, timelines, etc.) would significantly improve comprehension of
+    complex concepts, relationships, or processes.
+
+    Args:
+        state: Agent state containing research notes and brief
+        config: Runtime configuration with model settings
+
+    Returns:
+        Dictionary containing diagram specifications for report generation
+    """
+    print("\n📊 ANALYZE_DIAGRAMS NODE CALLED")
+
+    # Step 1: Extract research context
+    notes = state.get("notes", [])
+    research_brief = state.get("research_brief", "")
+
+    if not notes:
+        print("   No research notes found, skipping diagram analysis")
+        return {"diagram_specifications": []}
+
+    # Step 2: Create analysis prompt for the supervisor to identify diagram opportunities
+    analysis_prompt = f"""You are reviewing research findings to identify where visual diagrams would enhance understanding.
+
+<Research Brief>
+{research_brief}
+</Research Brief>
+
+<Research Findings>
+{chr(10).join(notes)}
+</Research Findings>
+
+<Task>
+Analyze the research findings and identify 2-4 strategic locations where visual diagrams would significantly improve comprehension.
+
+For each identified location, determine:
+
+1. **Section/Topic**: Where in the report structure this diagram belongs
+2. **Diagram Type**: Choose the most effective type:
+   - **flowchart**: For decision processes, algorithms, workflows, step-by-step procedures
+   - **mindmap**: For concept relationships, hierarchies, knowledge organization
+   - **sequence**: For interactions between entities over time, communication flows
+   - **timeline**: For chronological progressions, historical development
+   - **hierarchy**: For organizational structures, taxonomies, classification systems
+
+3. **Detailed Specification**: Include:
+   - Exact section heading or topic
+   - All nodes/concepts that should be included
+   - Relationships and connections between elements
+   - Flow direction and hierarchy
+   - Labels and annotations
+
+<Guidelines>
+- Be strategic: Only suggest diagrams where they add genuine value
+- Don't suggest diagrams for simple lists or single concepts
+- Prefer flowcharts for processes and mindmaps for concept relationships
+- Each diagram should visualize at least 3-5 connected concepts
+- Focus on complex relationships that are hard to explain in text alone
+</Guidelines>
+
+<Output Format>
+Return a JSON object with a "diagrams" array. Each diagram should have:
+- section: Section heading (e.g., "2. Neural Network Architecture")
+- diagram_type: One of: flowchart, mindmap, sequence, timeline, hierarchy
+- title: Caption for the diagram (e.g., "Information Flow in Transformer Model")
+- description: Detailed description of nodes, relationships, and structure (2-3 sentences)
+- concepts: Array of key concepts/nodes to include (5-10 items)
+
+Example:
+{{
+  "diagrams": [
+    {{
+      "section": "2. Transformer Architecture",
+      "diagram_type": "flowchart",
+      "title": "Information Flow in Transformer Model",
+      "description": "Show how input tokens flow through the transformer layers. Start with token embedding, add positional encoding, pass through multi-head self-attention mechanism, then through feed-forward network, and finally to the output layer.",
+      "concepts": ["Input Tokens", "Token Embedding", "Positional Encoding", "Multi-Head Self-Attention", "Feed Forward Network", "Layer Normalization", "Output Layer"]
+    }}
+  ]
+}}
+</Output Format>
+</Task>"""
+
+    # Step 3: Configure analysis model
+    configurable = Configuration.from_runnable_config(config)
+    analysis_model_config = {
+        "model": configurable.research_model,
+        "max_tokens": 4000,
+        "api_key": get_api_key_for_model(configurable.research_model, config),
+        "tags": ["langsmith:nostream"],
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        # Step 4: Get LLM to analyze and specify diagrams
+        print("   Analyzing research findings for diagram opportunities...")
+        response = await configurable_model.with_config(analysis_model_config).ainvoke([
+            HumanMessage(content=analysis_prompt)
+        ])
+
+        # Step 5: Parse diagram specifications with robust error handling
+        import json
+
+        if not response.content or not response.content.strip():
+            print("   ⚠️  LLM returned empty response, skipping diagrams")
+            return {"diagram_specifications": []}
+
+        # Try to parse JSON response
+        try:
+            parsed_response = json.loads(response.content)
+            diagram_specs = parsed_response.get("diagrams", [])
+        except json.JSONDecodeError as json_err:
+            print(f"   ⚠️  JSON parsing failed: {json_err}")
+            print(f"   Response preview: {response.content[:200]}...")
+            # Try to extract JSON from response if it's wrapped in text
+            import re
+            json_match = re.search(r'\{.*"diagrams".*\}', response.content, re.DOTALL)
+            if json_match:
+                try:
+                    parsed_response = json.loads(json_match.group(0))
+                    diagram_specs = parsed_response.get("diagrams", [])
+                    print("   ✅ Successfully extracted JSON from response")
+                except:
+                    print("   ❌ Could not extract valid JSON, skipping diagrams")
+                    return {"diagram_specifications": []}
+            else:
+                print("   ❌ No JSON found in response, skipping diagrams")
+                return {"diagram_specifications": []}
+
+        if not diagram_specs or len(diagram_specs) == 0:
+            print("   📊 No diagrams recommended by analysis")
+            return {"diagram_specifications": []}
+
+        print(f"   ✅ Identified {len(diagram_specs)} diagram opportunities")
+        for i, spec in enumerate(diagram_specs):
+            print(f"      {i+1}. {spec.get('diagram_type', 'unknown')} - {spec.get('title', 'untitled')}")
+
+        return {
+            "diagram_specifications": diagram_specs,
+            "messages": [response]
+        }
+
+    except Exception as e:
+        print(f"   ❌ Error analyzing diagrams: {e}")
+        import traceback
+        print(f"   Traceback: {traceback.format_exc()}")
+        # Continue without diagrams if analysis fails
+        return {"diagram_specifications": []}
+
 async def final_report_generation(state: AgentState, config: RunnableConfig):
     """Generate the final comprehensive research report with retry logic for token limits.
     
@@ -617,7 +871,39 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
     notes = state.get("notes", [])
     cleared_state = {"notes": {"type": "override", "value": []}}
     findings = "\n".join(notes)
-    
+
+    # Step 1.5: Extract and format sources for citations
+    sources = state.get("sources", [])
+    if sources and len(sources) > 0:
+        sources_text = "\n\n".join([
+            f"**[{i+1}]** {source.get('title', 'Untitled')}\n"
+            f"- **Authors**: {', '.join(source.get('authors', [])[:3])}{'...' if len(source.get('authors', [])) > 3 else ''}\n"
+            f"- **URL**: {source.get('url', '')}\n"
+            f"- **Source**: {source.get('search_api', 'unknown').replace('_', ' ').title()}\n"
+            f"- **Published**: {source.get('published_date', 'N/A')}"
+            for i, source in enumerate(sources)
+        ])
+        print(f"\n📚 Including {len(sources)} sources for citations in final report")
+    else:
+        sources_text = "No structured sources available. Include any sources mentioned in the findings."
+        print("\n📚 No structured sources available for final report")
+
+    # Step 1.6: Format diagram specifications for prompt
+    diagram_specs = state.get("diagram_specifications", [])
+    if diagram_specs and len(diagram_specs) > 0:
+        diagram_specs_text = "\n\n".join([
+            f"**Diagram {i+1}**: {spec.get('section', 'Unknown section')}\n"
+            f"- **Type**: {spec.get('diagram_type', 'unknown')}\n"
+            f"- **Title**: {spec.get('title', 'Untitled')}\n"
+            f"- **Description**: {spec.get('description', '')}\n"
+            f"- **Key Concepts**: {', '.join(spec.get('concepts', []))}"
+            for i, spec in enumerate(diagram_specs)
+        ])
+        print(f"\n📊 Including {len(diagram_specs)} diagrams in final report")
+    else:
+        diagram_specs_text = "No diagrams specified. Write the report without any diagrams."
+        print("\n📊 No diagrams specified for final report")
+
     # Step 2: Configure the final report generation model
     configurable = Configuration.from_runnable_config(config)
     writer_model_config = {
@@ -626,12 +912,12 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
         "api_key": get_api_key_for_model(configurable.final_report_model, config),
         "tags": ["langsmith:nostream"]
     }
-    
+
     # Step 3: Attempt report generation with token limit retry logic
     max_retries = 3
     current_retry = 0
     findings_token_limit = None
-    
+
     while current_retry <= max_retries:
         try:
             # Create comprehensive prompt with all research context
@@ -639,6 +925,8 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
                 research_brief=state.get("research_brief", ""),
                 messages=get_buffer_string(state.get("messages", [])),
                 findings=findings,
+                sources=sources_text,
+                diagram_specifications=diagram_specs_text,
                 date=get_today_str()
             )
             
@@ -765,12 +1053,14 @@ deep_researcher_builder = StateGraph(
 deep_researcher_builder.add_node("clarify_with_user", clarify_with_user)           # User clarification phase
 deep_researcher_builder.add_node("write_research_brief", write_research_brief)     # Research planning phase
 deep_researcher_builder.add_node("research_supervisor", supervisor_subgraph)       # Research execution phase
+deep_researcher_builder.add_node("analyze_diagrams", analyze_diagrams)             # Diagram planning phase
 deep_researcher_builder.add_node("final_report_generation", final_report_generation)  # Report generation phase
 deep_researcher_builder.add_node("export_reports", export_reports)                 # Export phase
 
 # Define main workflow edges for sequential execution
 deep_researcher_builder.add_edge(START, "clarify_with_user")                       # Entry point
-deep_researcher_builder.add_edge("research_supervisor", "final_report_generation") # Research to report
+deep_researcher_builder.add_edge("research_supervisor", "analyze_diagrams")        # Research to diagram analysis
+deep_researcher_builder.add_edge("analyze_diagrams", "final_report_generation")    # Diagrams to report
 deep_researcher_builder.add_edge("final_report_generation", "export_reports")      # Report to export
 deep_researcher_builder.add_edge("export_reports", END)                            # Final exit point
 
